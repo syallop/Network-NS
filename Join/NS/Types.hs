@@ -1,6 +1,10 @@
+{-# LANGUAGE DeriveGeneric #-}
 module Join.NS.Types where
 
 import Data.ByteString
+import Data.Serialize
+
+import GHC.Generics
 
 -- | Name used to uniquely refer to a channel.
 type ChannelName = String
@@ -28,6 +32,8 @@ data ClientMsg
   -- | Client is quitting, releasing any registered names.
   -- No response.
   | ClientQuit
+  deriving Generic
+instance Serialize ClientMsg
 
 -- | Message sent server -> client
 data ServerMsg
@@ -51,4 +57,6 @@ data ServerMsg
 
   -- | A Non-empty list of 'ChannelName's are no longer registered.
   | Unregistered ChannelName [ChannelName]
+  deriving Generic
+instance Serialize ServerMsg
 
