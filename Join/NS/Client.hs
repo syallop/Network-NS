@@ -1,9 +1,32 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-|
+Module     : Join.NS.Client
+Copyright  : (c) Samuel A. Yallop, 2014
+Maintainer : syallop@gmail.com
+Stability  : experimental
+
+Defines a simple client to the nameserver defined at 'Join.NS.Server'.
+
+A Client is responsible for handling interactions with a single nameserver.
+-}
 module Join.NS.Client
-  (runNewClient
+  (-- * Running a client
+   -- | A new client may be created and ran by calling 'runNewClient' on the
+   -- address and port of the nameserver.
+   runNewClient
+  ,Client()
+  ,Callbacks(..)
+
+  -- ** Registering ChannelNames
   ,register
+
+  -- ** Querying ChannelNames
   ,query
+
+  -- ** Forwarding messages
   ,msgTo
+
+  -- ** Quiting
   ,clientQuit
   ) where
 
@@ -63,6 +86,7 @@ data ExpectMsg
   | ExpectQueryResp ChannelName
   deriving (Eq,Ord)
 
+
 -- | Cache of known registered and otherwise existing ChannelNames.
 -- registered => known
 data Cache = Cache
@@ -86,6 +110,20 @@ registerName n (Cache r k) = Cache (Set.insert n r)
 -- | Register existance of a new channelname.
 existsName :: ChannelName -> Cache -> Cache
 existsName n (Cache r k) = Cache r (Set.insert n k)
+
+-- | User callback functions asynchronously called on corresponding messages
+-- recieved from the server.
+data Callbacks = Callbacks
+  { -- | Called when a message is recieved for the channelname which the user
+    -- must have previously successfully registered.
+    _callbackMsgFor       :: ChannelName -> Msg -> IO ()
+
+    -- | Called when the server indicates it is quiting.
+  , _callbackServerQuit   :: IO ()
+
+  -- | Called on a non-empty list of ChannelName's which have become unregistered.
+  , _callbackUnregistered :: ChannelName -> [ChannelName] -> IO ()
+  }
 
 -- | State of a running nameserver client.
 data Client = Client
@@ -115,14 +153,15 @@ data Client = Client
   -- | Queue of parsed messages which are not recieved as a response to a sent message.
   , _msgInUnexpected  :: Chan UnexpectedServerMsg
 
-  -- | Handler function asynchronously called on all 'unexpected' messages.
-  , _handleUnexpected :: UnexpectedServerMsg -> IO ()
+  -- | User Callback functions
+  , _callbacks        :: Callbacks
   }
 
--- | Create a new client, connected to a nameserver at the given address and port
--- , with 'unexpected' server messages handled by the provided function.
-newClient :: String -> Int -> (UnexpectedServerMsg -> IO ()) -> IO Client
-newClient address port f = withSocketsDo $ do
+-- | Create a new client, connected to a nameserver at the given address and port.
+--
+-- Using the given callbacks to handle server messages.
+newClient :: String -> Int -> Callbacks -> IO Client
+newClient address port cbs = withSocketsDo $ do
   h <- (connectTo address $ PortNumber $ fromIntegral port)
   hSetBuffering h NoBuffering
   Client <$> pure h
@@ -133,15 +172,17 @@ newClient address port f = withSocketsDo $ do
          <*> newChan
          <*> newMVar Map.empty
          <*> newChan
-         <*> pure f
+         <*> pure cbs
 
 -- | Create and run a new client, connecting to the nameserver at the given
--- address and port, handling 'unexpected' server messages with the callback.
-runNewClient :: String -> Int -> (UnexpectedServerMsg -> IO ()) -> IO Client
-runNewClient address port f
+-- address and port.
+--
+-- Using the given callbacks to handle server messages.
+runNewClient :: String -> Int -> Callbacks -> IO Client
+runNewClient address port cbs
   | port < 0 = error "Int port number must be > 0"
   | otherwise = do
-      c <- newClient address port f
+      c <- newClient address port cbs
       forkFinally (runClient c) (\_ -> hClose (_serverHandle c))
       return c
 
@@ -286,7 +327,7 @@ handleMsgInUnexpected umsg c = case umsg of
 
   -- The server is quitting. Also quit outself.
   UServerQuit
-    -> do forkIO $ (_handleUnexpected c) umsg
+    -> do forkIO $ (_callbackServerQuit . _callbacks $ c)
           return False
 
   -- A message has been relayed for the channelname.
@@ -297,7 +338,7 @@ handleMsgInUnexpected umsg c = case umsg of
 
             -- We don't own the channelname.. Drop silently.
             False -> return True
-            True  -> do forkIO $ (_handleUnexpected c) umsg
+            True  -> do forkIO $ (_callbackMsgFor . _callbacks $ c) cName msg
                         return True
 
   -- The (previously registered) names are now unregistered.
@@ -307,7 +348,7 @@ handleMsgInUnexpected umsg c = case umsg of
           let cache' = unregisteredNames (n:ns) cache
           putMVar (_cachedNames c) cache'
 
-          forkIO $ (_handleUnexpected c) umsg
+          forkIO $ (_callbackUnregistered . _callbacks $ c) n ns
           return True
 
 -- | Encode and write outgoing messages to the nameserver.
@@ -361,10 +402,9 @@ register c cName = do
 --
 -- May block on a response from the nameserver.
 --
--- False => Is not registered by anybody.
---       => May not send messages.
--- True  => Is registered by somebody.
---       => May continue to send messages.
+-- - False => Is not registered by anybody => May not send messages.
+--
+-- - True  => Is registered by somebody => May continue to send messages.
 query :: Client -> ChannelName -> IO Bool
 query c cName = do
   cache <- readMVar (_cachedNames c)
@@ -388,10 +428,10 @@ query c cName = do
 
 -- | Send the message to the given ChannelName.
 --
--- False => We don't know of the name
---       => the message wasnt sent.
---       A successful query (or unsuccesful register) must be made first.
--- True  => The message was sent.
+-- - False => We don't know of the name => the message wasnt sent.
+--   A successful query (or unsuccesful register) must be made first.
+--
+-- - True  => The message was sent.
 msgTo :: Client -> ChannelName -> ByteString -> IO Bool
 msgTo c cName msg = do
   cache <- readMVar (_cachedNames c)
