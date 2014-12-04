@@ -1,6 +1,104 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-|
+Module     : Join.NS.Server
+Copyright  : (c) Samuel A. Yallop, 2014
+Maintainer : syallop@gmail.com
+Stability  : experimental
+
+Defines a quick and dirty nameserver which acts as a central authority for
+mapping 'ChannelName's to client's which have registered them.
+The nameserver supports querying the existance of names as well as forwarding
+ByteString 'encode'd messages.
+
+A client for the nameserver is found at 'Join.NS.Client'.
+-}
 module Join.NS.Server
-  (runNewServer
+  (
+  -- * Running nameserver
+  -- | The nameserver may be ran by calling 'runNewServer PORT' to run an instance
+  -- which listens for TCP connections on the given port.
+  --
+  -- Alternatively, cabal will build an executable named NS which accepts the port number
+  -- as a commandline arg.
+   runNewServer
+
+  -- * Interacting with a nameserver
+  -- ** Client:
+  -- | A client is found at 'Join.NS.Client'.
+  -- The protocol is summarised below.
+
+  -- ** Protocol:
+  -- | The nameserver communicates with multiple connected clients
+  -- asynchronously reading 'ClientMsg's and emitting 'ServerMsg's.
+  --
+  -- These messages are 'encode'd as 'ByteString's and sent as is
+  -- (I.E. NOT newline terminated/ no message headers).
+  --
+  -- Because all messages are asynchronous, it is the clients responsibility to extract and match
+  -- messages returned from the nameserver.
+  --
+  -- Internally, Server->Client messages are described as being either 'expected' or 'unexpected'.
+  -- 'expected' messages are those a client will be expecting as a reply to some corresponding outgoing message.
+  -- 'unexpected' messages may be recieved at any time, not as a response to any message.
+
+  -- *** Registration of channelnames:
+  -- |
+  --
+  -- @
+  --   Message           : 'Register' CHANNELNAME
+  --   Direction         : Client -> Server
+  --   Meaning           : Request registration of a channelname.
+  --
+  --   Expected response : 'RegisterResp' CHANNELNAME success
+  --   Direction         : Client <- Server
+  --   Meaning           : If successfull, the client has registered the CHANNELNAME and subsequently may recieve unexpected
+  --                       'MsgFor CHANNELNAME msg' messages.
+  -- @
+
+  -- *** Querying of channelnames:
+  -- |
+  -- @
+  --  Message           : 'Query' CHANNELNAME
+  --  Direction         : Client -> Server
+  --  Meaning           : Query whether the given channelname exists/ is registered by somebody
+  --
+  --  Expected response : 'RegisterResp' CHANNELNAME success
+  --  Direction         : Client <- Server
+  --  Meaning           : The given CHANNELNAME does/ does not exist. If so, the client may now send 'MsgTo CHANNELNAME msg'
+  --                      messages.
+  -- @
+
+  -- *** Quit messages:
+  -- |
+  -- @
+  --  Message           : ClientQuit'
+  --  Direction         : Client -> Server
+  --  Meaning           : The client is quitting releasing ownership of any registered channelnames (which may be re-registered)
+  --                      and shouldnt be sent any more messages, regardless of whether any are still expected.
+  --                      If the client had registered channelnames, then an unexpected 'Unregistered CHANNELNAME CHANNELNAMES'
+  --                      message is sent to atleast all clients which knew of the registered names, at most to all clients.
+  --
+  --  Message           : 'ServerQuit'
+  --  Direction         : Client <- Server
+  --  Meaning           : The server is quitting. No more messages can be sent or recieved.
+  -- @
+
+
+  -- *** Message forwarding:
+  -- |
+  -- @
+  --  Message           : 'MsgTo' CHANNELNAME msg
+  --  Direction         : Client -> Server
+  --  Meaning           : The given message should be forwarded to the owner of the CHANNELNAME.
+  --                      The client should first establish the CHANNELNAME exists because there is no expected
+  --                      response message regardless of success or failure.
+  --
+  --  Message           : 'MsgFrom' CHANNELNAME msg
+  --  Direction         : Client <- Server
+  --  Unexpected
+  --  Meaning           : The client has previously registered ownership of CHANNELNAME, to which the msg should be
+  --                      forwarded to.
+  -- @
   ) where
 
 import           Control.Applicative
