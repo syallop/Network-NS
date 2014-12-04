@@ -37,9 +37,10 @@ module Join.NS.Server
   -- Because all messages are asynchronous, it is the clients responsibility to extract and match
   -- messages returned from the nameserver.
   --
-  -- Internally, Server->Client messages are described as being either 'expected' or 'unexpected'.
-  -- 'expected' messages are those a client will be expecting as a reply to some corresponding outgoing message.
-  -- 'unexpected' messages may be recieved at any time, not as a response to any message.
+  -- Below, Server->Client messages are described as being 'expected' when they are
+  -- expected as a response to some corresponding outgoing Client->Server message.
+  -- Other Server->Client messages are 'unexpected' in that they may be recieved
+  -- at any time, not as a response to any message.
 
   -- *** Registration of channelnames:
   -- |
@@ -54,6 +55,22 @@ module Join.NS.Server
   --   Meaning           : If successfull, the client has registered the CHANNELNAME and subsequently may recieve unexpected
   --                       'MsgFor CHANNELNAME msg' messages.
   -- @
+  --
+  -- E.G. "name" is registered to the client.
+  --
+  -- @
+  --   OUT: Register "name"
+  --   ...
+  --   IN: RegisterResp "name" True
+  -- @
+  --
+  -- E.G. "name" is not registered to the client.
+  --
+  -- @
+  --   OUT: Register "name"
+  --   ...
+  --   IN: RegisterResp "name" False
+  -- @
 
   -- *** Querying of channelnames:
   -- |
@@ -66,6 +83,22 @@ module Join.NS.Server
   --  Direction         : Client <- Server
   --  Meaning           : The given CHANNELNAME does/ does not exist. If so, the client may now send 'MsgTo CHANNELNAME msg'
   --                      messages.
+  -- @
+  --
+  -- E.G. "name" exists
+  --
+  -- @
+  --   OUT: Query "name"
+  --   ...
+  --   IN:  QueryResp "name" True
+  -- @
+  --
+  -- E.G. "name" does not exist
+  --
+  -- @
+  --   OUT: Query "name"
+  --   ...
+  --   IN:  QueryResp "name" True
   -- @
 
   -- *** Quit messages:
