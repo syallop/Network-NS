@@ -46,36 +46,6 @@ import Prelude hiding (null)
 
 import Join.NS.Types
 
--- | Subset of 'ServerMsg' representing messages which are
--- 'expected' as a response to some prior outgoing message.
-data ExpectedServerMsg
-  = ERegisterResp ChannelName Bool -- ^ 'RegisterResp'
-  | EQueryResp    ChannelName Bool -- ^ 'QueryResp'
-
--- | Subset of 'ServerMsg' representing messages which are
--- 'unexpected' in that they may be recieved at any time
--- - not as a response to a prior outgoing message.
-data UnexpectedServerMsg
-  = UMsgFor       ChannelName Msg           -- ^ 'MsgFor'
-  | UServerQuit                             -- ^ 'ServerQuit'
-  | UUnregistered ChannelName [ChannelName] -- ^ 'Unregistered'
-
--- | Split a ServerMsg into it's corresponding Expected/Unexpected tagged
--- counter-part.
-splitByExpectation :: ServerMsg -> Either UnexpectedServerMsg ExpectedServerMsg
-splitByExpectation smsg = case smsg of
-  RegisterResp cName success
-    -> Right $ ERegisterResp cName success
-  QueryResp cName success
-    -> Right $ EQueryResp cName success
-
-  MsgFor cName msg
-    -> Left $ UMsgFor cName msg
-  ServerQuit
-    -> Left $ UServerQuit
-  Unregistered n ns
-    -> Left $ UUnregistered n ns
-
 -- | Represents an expectation that the client receive a response
 -- of a certain kind.
 data ExpectMsg
@@ -144,14 +114,11 @@ data Client = Client
   -- | Queue of outgoing messages.
   , _msgOut           :: Chan ClientMsg
 
-  -- | Queue of parsed messages from the nameserver that may be being waited upon.
-  , _msgInExpected    :: Chan ExpectedServerMsg
+  -- | Queue of parsed messages from the nameserver.
+  , _msgIn            :: Chan ServerMsg
 
   -- | Map response message expectations to the locations waiting for the success response value.
   , _expectations     :: MVar (Map.Map ExpectMsg [MVar Bool])
-
-  -- | Queue of parsed messages which are not recieved as a response to a sent message.
-  , _msgInUnexpected  :: Chan UnexpectedServerMsg
 
   -- | User Callback functions
   , _callbacks        :: Callbacks
@@ -171,7 +138,6 @@ newClient address port cbs = withSocketsDo $ do
          <*> newChan
          <*> newChan
          <*> newMVar Map.empty
-         <*> newChan
          <*> pure cbs
 
 -- | Create and run a new client, connecting to the nameserver at the given
@@ -187,9 +153,8 @@ runNewClient address port cbs
       return c
 
 -- | Concurrently and continually:
--- - Parse and partition incoming ServerMsg's into un/expected.
--- - Handle the queue of valid incoming expected messages
--- - Handle the queue of valid incoming unexpected messages
+-- - Parse and incoming ServerMsg
+-- - Handle the queue of valid incoming messages
 -- - Handle the queue of valid outgoing ClientMsgs
 --
 -- Terminating all threads when any returns, which will happen if:
@@ -198,10 +163,7 @@ runNewClient address port cbs
 -- - The server handle dies
 -- - A misc exception is thrown
 runClient :: Client -> IO ()
-runClient c = void $ race (readInput "")
-   $ race handleMsgInExpectedQueue
-   $ race handleMsgInUnexpectedQueue
-          handleMsgOutQueue
+runClient c = void $ race (readInput "") $ race handleMsgInQueue handleMsgOutQueue
   where
   -- continually read, parse and queue incoming messages in
   -- their corresponding queue.
@@ -221,11 +183,9 @@ runClient c = void $ race (readInput "")
       Fail e leftover'
         -> readInput leftover'
 
-      -- Complete ServerMsg read. Partition, queue and continue with any leftovers.
+      -- Complete ServerMsg read. Queue and continue with any leftovers.
       Done smsg leftover'
-        -> do case splitByExpectation smsg of
-                  Left umsg  -> writeChan (_msgInUnexpected c) umsg
-                  Right emsg -> writeChan (_msgInExpected c) emsg
+        -> do writeChan (_msgIn c) smsg
               readInput leftover'
 
       -- More input required. Attempt to read more and try again.
@@ -235,21 +195,13 @@ runClient c = void $ race (readInput "")
                 then return ()
                 else caseParseResult (f msgPart)
 
-  -- Handle the messages in the expected input queue until continue=False
-  handleMsgInExpectedQueue :: IO ()
-  handleMsgInExpectedQueue = join $ do
-    inMsg <- readChan (_msgInExpected c)
+  -- Handle the messages in the input queue until continue=False
+  handleMsgInQueue :: IO ()
+  handleMsgInQueue = join $ do
+    inMsg <- readChan (_msgIn c)
     return $ do
-      continue <- handleMsgInExpected inMsg c
-      when continue handleMsgInExpectedQueue
-
-  -- Handle the messages in the unexpected input queue until continue=False
-  handleMsgInUnexpectedQueue :: IO ()
-  handleMsgInUnexpectedQueue = join $ do
-    inMsg <- readChan (_msgInUnexpected c)
-    return $ do
-      continue <- handleMsgInUnexpected inMsg c
-      when continue handleMsgInUnexpectedQueue
+      continue <- handleMsgIn inMsg c
+      when continue handleMsgInQueue
 
   -- Handle the messages in the output queue until continue=False
   handleMsgOutQueue :: IO ()
@@ -259,14 +211,14 @@ runClient c = void $ race (readInput "")
       continue <- handleMsgOut outMsg c
       when continue handleMsgOutQueue
 
--- | Handle a single message from a clients expected input queue,
+-- | Handle a single message from a clients input queue,
 -- returning a bool indicating whether the connection to the nameserver
 -- should be closed.
-handleMsgInExpected :: ExpectedServerMsg -> Client -> IO Bool
-handleMsgInExpected emsg c = case emsg of
+handleMsgIn :: ServerMsg -> Client -> IO Bool
+handleMsgIn smsg c = case smsg of
 
   -- We have/ havent registered the name
-  ERegisterResp cName success
+  RegisterResp cName success
     -> do -- cache ownership and/or existance of name
           cache <- takeMVar (_cachedNames c)
           if success
@@ -292,7 +244,7 @@ handleMsgInExpected emsg c = case emsg of
                             return True
 
   -- The name is/ is not registered by somebody
-  EQueryResp cName success
+  QueryResp cName success
     -> do -- cache existance of name
           cache <- takeMVar (_cachedNames c)
           if success
@@ -319,19 +271,13 @@ handleMsgInExpected emsg c = case emsg of
                             putMVar (_expectations c) expectations'
                             return True
 
--- | Handle a single message from a clients unexpected input queue,
--- returning a bool indicating whether the connection to the nameserver
--- should be closed.
-handleMsgInUnexpected :: UnexpectedServerMsg -> Client -> IO Bool
-handleMsgInUnexpected umsg c = case umsg of
-
   -- The server is quitting. Also quit outself.
-  UServerQuit
+  ServerQuit
     -> do forkIO $ (_callbackServerQuit . _callbacks $ c)
           return False
 
   -- A message has been relayed for the channelname.
-  UMsgFor cName msg
+  MsgFor cName msg
     -> do -- Ensure we only call the handler on channelnames the user has registered
           Cache registeredNames _ <- readMVar (_cachedNames c)
           case Set.member cName registeredNames of
@@ -342,7 +288,7 @@ handleMsgInUnexpected umsg c = case umsg of
                         return True
 
   -- The (previously registered) names are now unregistered.
-  UUnregistered n ns
+  Unregistered n ns
     -> do -- Remove all names from cache
           cache <- takeMVar (_cachedNames c)
           let cache' = unregisteredNames (n:ns) cache
