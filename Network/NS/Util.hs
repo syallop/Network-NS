@@ -3,6 +3,9 @@ module Network.NS.Util
   (runCommunicator
   ,readInput
   ,handleChan
+
+  ,continueAfter
+  ,stopAfter
   ) where
 
 import           Control.Applicative
@@ -87,4 +90,12 @@ handleChan f chan = join $ do
   return $ do
     continue <- f msg
     when continue (handleChan f chan)
+
+-- Return True after running (and discarding the result) of an io action
+continueAfter :: IO a -> IO Bool
+continueAfter io = void io >> return True
+
+-- Return False after running (and discarding the result) of an io action
+stopAfter :: IO a -> IO Bool
+stopAfter io = void io >> return False
 

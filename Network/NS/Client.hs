@@ -271,35 +271,34 @@ handleMsgIn smsg c = case smsg of
 
   -- We have/ havent registered the name
   RegisterResp n success
-    -> do updateCacheRegister c n success
+    -> continueAfter
+     $ do updateCacheRegister c n success
           notifyExpecters c (ExpectRegisterResp n) success
-          return True
 
   -- The name is/ is not registered by somebody
   QueryResp n success
-    -> do updateCacheQuery c n success
+    -> continueAfter
+     $ do updateCacheQuery c n success
           notifyExpecters c (ExpectQueryResp n) success
-          return True
 
   -- The server is quitting. Also quit outself.
   ServerQuit
-    -> do forkIO $ (_callbackServerQuit . _callbacks $ c)
-          return False
+    -> stopAfter $ forkIO $ (_callbackServerQuit . _callbacks $ c)
 
   -- A message has been relayed for the name.
   MsgFor n msg
-    -> do -- Ensure we only call the handler on names the user has registered
-          Cache registeredNames _ <- readMVar (_cachedNames c)
-          when (Set.member n registeredNames)
+    -> continueAfter
+     $ do -- Ensure we only call the handler on names the user has registered
+          cache <- readMVar (_cachedNames c)
+          when (nameRegistered n cache)
                (void $ forkIO $ (_callbackMsgFor . _callbacks $ c) n msg)
-          return True
 
   -- The (previously registered) names are now unregistered.
   Unregistered n ns
-    -> do -- Remove all names from cache
+    -> continueAfter
+     $ do -- Remove all names from cache
           modifyMVar_ (_cachedNames c) $ return . unregisteredNames (n:ns)
           forkIO $ (_callbackUnregistered . _callbacks $ c) n ns
-          return True
 
 -- | Encode and write outgoing messages to the nameserver.
 -- Determining that we should quit communication

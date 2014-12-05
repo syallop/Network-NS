@@ -286,7 +286,8 @@ handleMsgIn cmsg c s = case cmsg of
   -- Client is quitting. Notify other clients
   -- of any unregistered names and stop communication.
     ClientQuit
-      -> do nm <- takeMVar (_names s)
+      -> stopAfter
+       $ do nm <- takeMVar (_names s)
 
             -- Remove client from server
             modifyMVar_ (_clientConns s) $ return . Map.delete (_clientId c)
@@ -306,11 +307,11 @@ handleMsgIn cmsg c s = case cmsg of
                         putMVar (_names s) nm'
 
                         broadcastToClients s (Unregistered n ns)
-            return False
 
     -- Client requests registration of a Name
     Register n
-      -> do ns <- takeMVar (_names s)
+      -> continueAfter
+       $ do ns <- takeMVar (_names s)
             case lookupClientId n ns of
 
               -- name already taken
@@ -322,31 +323,22 @@ handleMsgIn cmsg c s = case cmsg of
                 Nothing
                   -> do putMVar (_names s) (insert (_clientId c) [n] ns)
                         sendToClient c (RegisterResp n True)
-            return True
 
     -- Client queries the existance of a name
     Query n
-      -> withMVar (_names s) $ \ns -> case lookupClientId n ns of
-
-             -- Name doesnt exist
-             Nothing -> do sendToClient c (QueryResp n False)
-                           return True
-             -- Name exists
-             Just _  -> do sendToClient c (QueryResp n True)
-                           return True
+      -> continueAfter
+       $ withMVar (_names s) $ \ns -> case lookupClientId n ns of
+             Nothing -> sendToClient c (QueryResp n False)
+             Just _  -> sendToClient c (QueryResp n True)
 
     -- Client requests that the Msg is sent to the owner of Name
     MsgTo n msg
-      -> withMVar (_names s) $ \ns -> case lookupClientId n ns of
-
-             -- Name isnt registered. Silently drop message.
-             Nothing
-               -> return True
-
+      -> continueAfter
+       $ withMVar (_names s) $ \ns -> case lookupClientId n ns of
+             Nothing -> return () -- Name not registered.. Drop silently.
              Just targetCId
                -> do targetClient <- fromJust <$> lookupClientConn targetCId s
                      sendToClient targetClient (MsgFor n msg)
-                     return True
 
 -- | Encode and write outgoing messages to the client.
 -- Determining that we should quit communication
