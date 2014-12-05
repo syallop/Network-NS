@@ -1,6 +1,6 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-|
-Module     : Join.NS.Types
+Module     : Network.NS.Types
 Copyright  : (c) Samuel A. Yallop, 2014
 Maintainer : syallop@gmail.com
 Stability  : experimental
@@ -8,7 +8,7 @@ Stability  : experimental
 Define types used by the nameserver server and client.
 
 -}
-module Join.NS.Types where
+module Network.NS.Types where
 
 import Data.ByteString
 import Data.Serialize

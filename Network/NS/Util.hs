@@ -1,5 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables, OverloadedStrings #-}
-module Join.NS.Util
+module Network.NS.Util
   (runCommunicator
   ,readInput
   ,handleChan

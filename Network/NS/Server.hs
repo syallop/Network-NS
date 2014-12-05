@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-|
-Module     : Join.NS.Server
+Module     : Network.NS.Server
 Copyright  : (c) Samuel A. Yallop, 2014
 Maintainer : syallop@gmail.com
 Stability  : experimental
@@ -10,9 +10,9 @@ mapping 'ChannelName's to client's which have registered them.
 The nameserver supports querying the existance of names as well as forwarding
 ByteString 'encode'd messages.
 
-A client for the nameserver is found at 'Join.NS.Client'.
+A client for the nameserver is found at 'Network.NS.Client'.
 -}
-module Join.NS.Server
+module Network.NS.Server
   (
   -- * Running nameserver
   -- | The nameserver may be ran by calling 'runNewServer PORT' to run an instance
@@ -24,7 +24,7 @@ module Join.NS.Server
 
   -- * Interacting with a nameserver
   -- ** Client:
-  -- | A client is found at 'Join.NS.Client'.
+  -- | A client is found at 'Network.NS.Client'.
   -- The protocol is summarised below.
 
   -- ** Protocol:
@@ -148,8 +148,8 @@ import           System.IO                              hiding (hPutStr)
 
 import Prelude hiding (null)
 
-import Join.NS.Types
-import Join.NS.Util
+import Network.NS.Types
+import Network.NS.Util
 
 -- | Map clientId's to the list of ChannelNames they own
 -- and vice-versa.
@@ -212,20 +212,16 @@ newServer = Server <$> newMVar Map.empty
 
 -- | Add a new client to the server, returning the ClientConn.
 addClientConn :: ClientId -> Handle -> Server -> IO ClientConn
-addClientConn cId cHandle server = do
-  cs <- takeMVar (_clientConns server)
+addClientConn cId cHandle server = modifyMVar (_clientConns server) $ \cs -> do
   c  <- ClientConn <$> pure cId
                    <*> pure cHandle
                    <*> newChan
                    <*> newChan
-  putMVar (_clientConns server) (Map.insert cId c cs)
-  return c
+  return (Map.insert cId c cs,c)
 
 -- | Lookup the ClientConn associated with an Id.
 lookupClientConn :: ClientId -> Server -> IO (Maybe ClientConn)
-lookupClientConn cId s = do
-  cs <- readMVar (_clientConns s)
-  return $ Map.lookup cId cs
+lookupClientConn cId s = readMVar (_clientConns s) >>= return . Map.lookup cId
 
 -- | Queue a ServerMsg to be sent to the client.
 sendToClient :: ClientConn -> ServerMsg -> IO ()
@@ -237,10 +233,7 @@ receivedFromClient c cmsg = writeChan (_clientMsgIn c) cmsg
 
 -- | Queue a ServerMsg to be sent to all clients.
 broadcastToClients :: Server -> ServerMsg -> IO ()
-broadcastToClients s smsg = do
-  cs <- takeMVar (_clientConns s)
-  mapM_ (`sendToClient` smsg) (Map.elems cs)
-  putMVar (_clientConns s) cs
+broadcastToClients s smsg = readMVar (_clientConns s) >>= mapM_ (`sendToClient` smsg) . Map.elems
 
 -- | Run a new instance of a nameserver.
 runNewServer :: Int -> IO ()
@@ -293,9 +286,7 @@ handleMsgIn cmsg c s = case cmsg of
       -> do nm <- takeMVar (_channelNames s)
 
             -- Remove client from server
-            cs <- takeMVar (_clientConns s)
-            let cs' = Map.delete (_clientId c) cs
-            putMVar (_clientConns s) cs'
+            modifyMVar_ (_clientConns s) $ return . Map.delete (_clientId c)
 
             case lookupNames (_clientId c) nm of
 
@@ -332,29 +323,27 @@ handleMsgIn cmsg c s = case cmsg of
 
     -- Client queries the existance of a channelName
     Query cName
-      -> do ns <- readMVar (_channelNames s)
-            case lookupClientId cName ns of
+      -> withMVar (_channelNames s) $ \ns -> case lookupClientId cName ns of
 
-                -- ChannelName doesnt exist
-                Nothing -> sendToClient c (QueryResp cName False)
-
-                -- ChannelName exists
-                Just _  -> sendToClient c (QueryResp cName True)
-            return True
+             -- ChannelName doesnt exist
+             Nothing -> do sendToClient c (QueryResp cName False)
+                           return True
+             -- ChannelName exists
+             Just _  -> do sendToClient c (QueryResp cName True)
+                           return True
 
     -- Client requests that the Msg is sent to the owner of ChannelName
     MsgTo cName msg
-      -> do ns <- readMVar (_channelNames s)
-            case lookupClientId cName ns of
+      -> withMVar (_channelNames s) $ \ns -> case lookupClientId cName ns of
 
-                -- ChannelName isnt registered. Silently drop message.
-                Nothing
-                  -> return True
+             -- ChannelName isnt registered. Silently drop message.
+             Nothing
+               -> return True
 
-                Just targetCId
-                  -> do targetClient <- fromJust <$> lookupClientConn targetCId s
-                        sendToClient targetClient (MsgFor cName msg)
-                        return True
+             Just targetCId
+               -> do targetClient <- fromJust <$> lookupClientConn targetCId s
+                     sendToClient targetClient (MsgFor cName msg)
+                     return True
 
 -- | Encode and write outgoing messages to the client.
 -- Determining that we should quit communication
