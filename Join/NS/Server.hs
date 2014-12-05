@@ -275,17 +275,12 @@ newClient cHandle server = do
 -- - The client handle dies
 -- - A misc exception is thrown
 serveClient :: ClientConn -> Server -> IO ()
-serveClient c s = void $ race handleInput $ race handleMsgInQueue handleMsgOutQueue
-  where
-    -- Continually read, parse and queue incomming messages
-    handleInput = readInput (_clientHandle c) 1024 (_clientMsgIn c)
-
-    -- Handle the messages in the input queue until continue=False
-    handleMsgInQueue = handleChan (\msgIn -> handleMsgIn msgIn c s) (_clientMsgIn c)
-
-    -- Handle the messages in the output queue until continue=False
-    handleMsgOutQueue = handleChan (\msgOut -> handleMsgOut msgOut c s) (_clientMsgOut c)
-
+serveClient c s = runCommunicator (_clientHandle c)
+                                  1024
+                                  (_clientMsgIn c)
+                                  (_clientMsgOut c)
+                                  (\msgIn -> handleMsgIn msgIn c s)
+                                  (\msgOut -> handleMsgOut msgOut c s)
 
 -- | Handle a single message from a clients input queue,
 -- returning a bool indicating whether the connection should be closed.

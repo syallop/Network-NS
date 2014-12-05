@@ -1,6 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables, OverloadedStrings #-}
 module Join.NS.Util
-  (readInput
+  (runCommunicator
+  ,readInput
   ,handleChan
   ) where
 
@@ -17,7 +18,30 @@ import           System.IO                              hiding (hPutStr)
 
 import Prelude hiding (null)
 
--- | Continually read, parse and queue incomming messages until EOF.
+-- | Run some abstract 'communicator' by concurrently:
+-- - Reading, parsing and queueing incoming messages
+-- - Handling parsed in-messages with some function fIn
+-- - Handling parsed out-messages with some function fOut
+--
+-- Termination happens to all threads if any returns, which will happen if:
+-- - EOF is read on the handle
+-- - fIn returns False
+-- - fOut returns False
+-- - A misc exception is thrown
+runCommunicator :: forall i o. (Serialize i, Serialize o)
+                => Handle -- ^ Handle to incomming messages
+                -> Int    -- ^ Maximum number of bytes to read at a time
+                -> Chan i -- ^ Channel of parsed input messages
+                -> Chan o -- ^ Channel of parsed output messages
+                -> (i -> IO Bool) -- ^ Handle parsed input, deciding whether to continue.
+                -> (o -> IO Bool) -- ^ Handle parsed output, deciding whether to continue.
+                -> IO ()
+runCommunicator h bytes chanIn chanOut fIn fOut =
+    void $ race (readInput h bytes chanIn)
+          $ race (handleChan fIn chanIn)
+                  (handleChan fOut chanOut)
+
+-- | Continually read, parse and queue incoming messages until EOF.
 readInput :: forall t. Serialize t
           => Handle     -- ^ Open communication handle
           -> Int        -- ^ Number of bytes to try and read at a time

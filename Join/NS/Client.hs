@@ -207,16 +207,12 @@ runNewClient address port cbs
 -- - The server handle dies
 -- - A misc exception is thrown
 runClient :: Client -> IO ()
-runClient c = void $ race handleInput $ race handleMsgInQueue handleMsgOutQueue
-  where
-  -- Continually read, parse and queue incoming messages
-  handleInput = readInput (_serverHandle c) 1024 (_msgIn c)
-
-  -- Handle the messages in the input queue until continue=False
-  handleMsgInQueue = handleChan (`handleMsgIn` c) (_msgIn c)
-
-  -- Handle the messages in the output queue until continue=False
-  handleMsgOutQueue = handleChan (`handleMsgOut` c) (_msgOut c)
+runClient c = runCommunicator (_serverHandle c)
+                              1024
+                              (_msgIn c)
+                              (_msgOut c)
+                              (`handleMsgIn` c)
+                              (`handleMsgOut` c)
 
 -- | Handle a single message from a clients input queue,
 -- returning a bool indicating whether the connection to the nameserver
