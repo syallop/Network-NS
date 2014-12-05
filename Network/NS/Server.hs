@@ -6,7 +6,7 @@ Maintainer : syallop@gmail.com
 Stability  : experimental
 
 Defines a quick and dirty nameserver which acts as a central authority for
-mapping 'ChannelName's to client's which have registered them.
+mapping 'Name's to client's which have registered them.
 The nameserver supports querying the existance of names as well as forwarding
 ByteString 'encode'd messages.
 
@@ -42,18 +42,18 @@ module Network.NS.Server
   -- Other Server->Client messages are 'unexpected' in that they may be recieved
   -- at any time, not as a response to any message.
 
-  -- *** Registration of channelnames:
+  -- *** Registration of names:
   -- |
   --
   -- @
-  --   Message           : 'Register' CHANNELNAME
+  --   Message           : 'Register' NAME
   --   Direction         : Client -> Server
-  --   Meaning           : Request registration of a channelname.
+  --   Meaning           : Request registration of a name.
   --
-  --   Expected response : 'RegisterResp' CHANNELNAME success
+  --   Expected response : 'RegisterResp' NAME success
   --   Direction         : Client <- Server
-  --   Meaning           : If successfull, the client has registered the CHANNELNAME and subsequently may recieve unexpected
-  --                       'MsgFor CHANNELNAME msg' messages.
+  --   Meaning           : If successfull, the client has registered the NAME and subsequently may recieve unexpected
+  --                       'MsgFor NAME msg' messages.
   -- @
   --
   -- E.G. "name" is registered to the client.
@@ -72,16 +72,16 @@ module Network.NS.Server
   --   IN: RegisterResp "name" False
   -- @
 
-  -- *** Querying of channelnames:
+  -- *** Querying of names:
   -- |
   -- @
-  --  Message           : 'Query' CHANNELNAME
+  --  Message           : 'Query' NAME
   --  Direction         : Client -> Server
-  --  Meaning           : Query whether the given channelname exists/ is registered by somebody
+  --  Meaning           : Query whether the given name exists/ is registered by somebody
   --
-  --  Expected response : 'RegisterResp' CHANNELNAME success
+  --  Expected response : 'RegisterResp' NAME success
   --  Direction         : Client <- Server
-  --  Meaning           : The given CHANNELNAME does/ does not exist. If so, the client may now send 'MsgTo CHANNELNAME msg'
+  --  Meaning           : The given NAME does/ does not exist. If so, the client may now send 'MsgTo NAME msg'
   --                      messages.
   -- @
   --
@@ -106,9 +106,9 @@ module Network.NS.Server
   -- @
   --  Message           : ClientQuit'
   --  Direction         : Client -> Server
-  --  Meaning           : The client is quitting releasing ownership of any registered channelnames (which may be re-registered)
+  --  Meaning           : The client is quitting releasing ownership of any registered names (which may be re-registered)
   --                      and shouldnt be sent any more messages, regardless of whether any are still expected.
-  --                      If the client had registered channelnames, then an unexpected 'Unregistered CHANNELNAME CHANNELNAMES'
+  --                      If the client had registered names, then an unexpected 'Unregistered NAME NAMES'
   --                      message is sent to atleast all clients which knew of the registered names, at most to all clients.
   --
   --  Message           : 'ServerQuit'
@@ -120,16 +120,16 @@ module Network.NS.Server
   -- *** Message forwarding:
   -- |
   -- @
-  --  Message           : 'MsgTo' CHANNELNAME msg
+  --  Message           : 'MsgTo' NAME msg
   --  Direction         : Client -> Server
-  --  Meaning           : The given message should be forwarded to the owner of the CHANNELNAME.
-  --                      The client should first establish the CHANNELNAME exists because there is no expected
+  --  Meaning           : The given message should be forwarded to the owner of the NAME.
+  --                      The client should first establish the NAME exists because there is no expected
   --                      response message regardless of success or failure.
   --
-  --  Message           : 'MsgFrom' CHANNELNAME msg
+  --  Message           : 'MsgFrom' NAME msg
   --  Direction         : Client <- Server
   --  Unexpected
-  --  Meaning           : The client has previously registered ownership of CHANNELNAME, to which the msg should be
+  --  Meaning           : The client has previously registered ownership of NAME, to which the msg should be
   --                      forwarded to.
   -- @
   ) where
@@ -151,42 +151,42 @@ import Prelude hiding (null)
 import Network.NS.Types
 import Network.NS.Util
 
--- | Map clientId's to the list of ChannelNames they own
+-- | Map clientId's to the list of Names they own
 -- and vice-versa.
-newtype ChannelNamesMap = ChannelNamesMap
-  {unChannelNamesMap :: (Map.Map ChannelName ClientId
-                        ,Map.Map ClientId    [ChannelName]
-                        )
+newtype NamesMap = NamesMap
+  {unNamesMap :: (Map.Map Name     ClientId
+                 ,Map.Map ClientId [Name]
+                 )
   }
 
-emptyChannelNamesMap :: ChannelNamesMap
-emptyChannelNamesMap = ChannelNamesMap (Map.empty,Map.empty)
+emptyNamesMap :: NamesMap
+emptyNamesMap = NamesMap (Map.empty,Map.empty)
 
--- | Map a ClientId <-> [ChannelName] overwriting any previous associations
-insert :: ClientId -> [ChannelName] -> ChannelNamesMap -> ChannelNamesMap
-insert cId cNames (ChannelNamesMap (nameToId,idToNames)) =
-  let newNameToId = Map.fromList [(cName,cId) | cName <- cNames]
+-- | Map a ClientId <-> [Name] overwriting any previous associations
+insert :: ClientId -> [Name] -> NamesMap -> NamesMap
+insert cId ns (NamesMap (nameToId,idToNames)) =
+  let newNameToId = Map.fromList [(n,cId) | n <- ns]
       nameToId'   = newNameToId `Map.union` nameToId
-      idToNames'  = Map.insertWith (++) cId cNames idToNames
-     in ChannelNamesMap (nameToId',idToNames')
+      idToNames'  = Map.insertWith (++) cId ns idToNames
+     in NamesMap (nameToId',idToNames')
 
--- | Lookup the ClientId who has registered the given ChannelName.
-lookupClientId :: ChannelName -> ChannelNamesMap -> Maybe ClientId
-lookupClientId cName (ChannelNamesMap (nameToId,_)) = Map.lookup cName nameToId
+-- | Lookup the ClientId who has registered the given Name.
+lookupClientId :: Name -> NamesMap -> Maybe ClientId
+lookupClientId n (NamesMap (nameToId,_)) = Map.lookup n nameToId
 
--- | Lookup all ChannelNames registered by the given ClientId.
-lookupNames :: ClientId -> ChannelNamesMap -> Maybe [ChannelName]
-lookupNames cId (ChannelNamesMap (_,idToNames)) = Map.lookup cId idToNames
+-- | Lookup all Names registered by the given ClientId.
+lookupNames :: ClientId -> NamesMap -> Maybe [Name]
+lookupNames cId (NamesMap (_,idToNames)) = Map.lookup cId idToNames
 
--- | Remove a ClientId and all of their registered ChannelNames from the map.
+-- | Remove a ClientId and all of their registered Names from the map.
 -- Unaltered when clientId does not exist.
-removeClient :: ClientId -> ChannelNamesMap -> ChannelNamesMap
-removeClient cId m@(ChannelNamesMap (nameToId,idToNames)) = case lookupNames cId m of
+removeClient :: ClientId -> NamesMap -> NamesMap
+removeClient cId m@(NamesMap (nameToId,idToNames)) = case lookupNames cId m of
   Nothing -> m -- Client not in map
   Just ns
     -> let nameToId'  = foldr (\name nameToId' -> Map.delete name nameToId') nameToId ns
            idToNames' = Map.delete cId idToNames
-          in ChannelNamesMap (nameToId',idToNames')
+          in NamesMap (nameToId',idToNames')
 
 
 -- | Store data related to a connected client.
@@ -202,13 +202,13 @@ data Server = Server
   { -- | All connected clients, indexed by their id
     _clientConns  :: MVar (Map.Map ClientId ClientConn)
 
-   -- | Map clientIds <-> channelNames
-  , _channelNames :: MVar ChannelNamesMap
+   -- | Map clientIds <-> Names
+  , _names :: MVar NamesMap
   }
 
 newServer :: IO Server
 newServer = Server <$> newMVar Map.empty
-                   <*> newMVar emptyChannelNamesMap
+                   <*> newMVar emptyNamesMap
 
 -- | Add a new client to the server, returning the ClientConn.
 addClientConn :: ClientId -> Handle -> Server -> IO ClientConn
@@ -281,9 +281,9 @@ handleMsgIn :: ClientMsg -> ClientConn -> Server -> IO Bool
 handleMsgIn cmsg c s = case cmsg of
 
   -- Client is quitting. Notify other clients
-  -- of any unregistered channelnames and stop communication.
+  -- of any unregistered names and stop communication.
     ClientQuit
-      -> do nm <- takeMVar (_channelNames s)
+      -> do nm <- takeMVar (_names s)
 
             -- Remove client from server
             modifyMVar_ (_clientConns s) $ return . Map.delete (_clientId c)
@@ -293,56 +293,56 @@ handleMsgIn cmsg c s = case cmsg of
                 -- Should be unreachable
                 Nothing -> error "Client not registered in server state"
 
-                -- Client hasnt registered any channelnames
+                -- Client hasnt registered any names
                 Just []
-                  -> putMVar (_channelNames s) nm
+                  -> putMVar (_names s) nm
 
-                -- Client registered >= 1 channelname
+                -- Client registered >= 1 name
                 Just (n:ns)
                   -> do let nm' = removeClient (_clientId c) nm
-                        putMVar (_channelNames s) nm'
+                        putMVar (_names s) nm'
 
                         broadcastToClients s (Unregistered n ns)
             return False
 
-    -- Client requests registration of a ChannelName
-    Register cName
-      -> do ns <- takeMVar (_channelNames s)
-            case lookupClientId cName ns of
+    -- Client requests registration of a Name
+    Register n
+      -> do ns <- takeMVar (_names s)
+            case lookupClientId n ns of
 
               -- name already taken
                 Just _
-                  -> do putMVar (_channelNames s) ns
-                        sendToClient c (RegisterResp cName False)
+                  -> do putMVar (_names s) ns
+                        sendToClient c (RegisterResp n False)
 
                 -- name free => registered to client
                 Nothing
-                  -> do putMVar (_channelNames s) (insert (_clientId c) [cName] ns)
-                        sendToClient c (RegisterResp cName True)
+                  -> do putMVar (_names s) (insert (_clientId c) [n] ns)
+                        sendToClient c (RegisterResp n True)
             return True
 
-    -- Client queries the existance of a channelName
-    Query cName
-      -> withMVar (_channelNames s) $ \ns -> case lookupClientId cName ns of
+    -- Client queries the existance of a name
+    Query n
+      -> withMVar (_names s) $ \ns -> case lookupClientId n ns of
 
-             -- ChannelName doesnt exist
-             Nothing -> do sendToClient c (QueryResp cName False)
+             -- Name doesnt exist
+             Nothing -> do sendToClient c (QueryResp n False)
                            return True
-             -- ChannelName exists
-             Just _  -> do sendToClient c (QueryResp cName True)
+             -- Name exists
+             Just _  -> do sendToClient c (QueryResp n True)
                            return True
 
-    -- Client requests that the Msg is sent to the owner of ChannelName
-    MsgTo cName msg
-      -> withMVar (_channelNames s) $ \ns -> case lookupClientId cName ns of
+    -- Client requests that the Msg is sent to the owner of Name
+    MsgTo n msg
+      -> withMVar (_names s) $ \ns -> case lookupClientId n ns of
 
-             -- ChannelName isnt registered. Silently drop message.
+             -- Name isnt registered. Silently drop message.
              Nothing
                -> return True
 
              Just targetCId
                -> do targetClient <- fromJust <$> lookupClientConn targetCId s
-                     sendToClient targetClient (MsgFor cName msg)
+                     sendToClient targetClient (MsgFor n msg)
                      return True
 
 -- | Encode and write outgoing messages to the client.

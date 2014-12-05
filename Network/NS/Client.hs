@@ -14,9 +14,9 @@ E.G. given:
 
 @
 callbacks = Callbacks
-  {_callbackMsgFor       = \cname msg -> putStrLn $ show cname ++ " sent: " ++ show msg
+  {_callbackMsgFor       = \name msg -> putStrLn $ show name ++ " sent: " ++ show msg
   ,_callbackServerQuit   = putStrLn \"ServerQuit\"
-  ,_callbackUnregistered = \cname cnames -> putStrLn $ "Unregistered: " ++ show (cname:cnames)
+  ,_callbackUnregistered = \name names -> putStrLn $ "Unregistered: " ++ show (name:names)
   }
 
 ...
@@ -57,13 +57,13 @@ module Network.NS.Client
    runNewClient
   ,Client()
   ,Callbacks(..)
-  ,ChannelName
+  ,Name
   ,Msg
 
-  -- ** Registering ChannelNames
+  -- ** Registering Names
   ,register
 
-  -- ** Querying ChannelNames
+  -- ** Querying Names
   ,query
 
   -- ** Forwarding messages
@@ -93,57 +93,57 @@ import Network.NS.Util
 -- | Represents an expectation that the client receive a response
 -- of a certain kind.
 data ExpectMsg
-  -- | Expect a 'ERegistered' response for the given ChannelName.
-  = ExpectRegisterResp ChannelName
+  -- | Expect a 'ERegistered' response for the given Name.
+  = ExpectRegisterResp Name
 
-  -- | Expect a 'EQuery' response for the given ChannelName.
-  | ExpectQueryResp ChannelName
+  -- | Expect a 'EQuery' response for the given Name.
+  | ExpectQueryResp Name
   deriving (Eq,Ord)
 
 
 
--- | Cache of known registered and otherwise existing ChannelNames.
+-- | Cache of known registered and otherwise existing Names.
 -- registered => known
 data Cache = Cache
-  {_registeredNames :: Set.Set ChannelName -- ^ ChannelNames known to be registered by us.
-  ,_knownNames      :: Set.Set ChannelName -- ^ ChannelNames known to be registered by somebody.
+  {_registeredNames :: Set.Set Name -- ^ Names known to be registered by us.
+  ,_knownNames      :: Set.Set Name -- ^ Names known to be registered by somebody.
   }
 
 emptyCache :: Cache
 emptyCache = Cache Set.empty Set.empty
 
 -- | Names have been unregistered and should be removed from the cache.
-unregisteredNames :: [ChannelName] -> Cache -> Cache
+unregisteredNames :: [Name] -> Cache -> Cache
 unregisteredNames ns (Cache r k) = Cache (foldr Set.delete r ns)
                                          (foldr Set.delete k ns)
 
--- | Register ownership of a new channelname.
-registerName :: ChannelName -> Cache -> Cache
+-- | Register ownership of a new name.
+registerName :: Name -> Cache -> Cache
 registerName n (Cache r k) = Cache (Set.insert n r)
                                    (Set.insert n k)
 
--- | Register existance of a new channelname.
-existsName :: ChannelName -> Cache -> Cache
+-- | Register existance of a new name.
+existsName :: Name -> Cache -> Cache
 existsName n (Cache r k) = Cache r (Set.insert n k)
 
-nameKnown :: ChannelName -> Cache -> Bool
-nameKnown cName (Cache _ k) = Set.member cName k
+nameKnown :: Name -> Cache -> Bool
+nameKnown n (Cache _ k) = Set.member n k
 
-nameRegistered :: ChannelName -> Cache -> Bool
-nameRegistered cName (Cache r _) = Set.member cName r
+nameRegistered :: Name -> Cache -> Bool
+nameRegistered n (Cache r _) = Set.member n r
 
 -- | User callback functions asynchronously called on corresponding messages
 -- recieved from the server.
 data Callbacks = Callbacks
-  { -- | Called when a message is recieved for the channelname which the user
+  { -- | Called when a message is recieved for the name which the user
     -- must have previously successfully registered.
-    _callbackMsgFor       :: ChannelName -> Msg -> IO ()
+    _callbackMsgFor       :: Name -> Msg -> IO ()
 
     -- | Called when the server indicates it is quiting.
   , _callbackServerQuit   :: IO ()
 
-  -- | Called on a non-empty list of ChannelName's which have become unregistered.
-  , _callbackUnregistered :: ChannelName -> [ChannelName] -> IO ()
+  -- | Called on a non-empty list of Name's which have become unregistered.
+  , _callbackUnregistered :: Name -> [Name] -> IO ()
   }
 
 -- | State of a running nameserver client.
@@ -157,7 +157,7 @@ data Client = Client
     -- | PortNumber of nameserver.
   , _serverPort       :: Int
 
-  -- | Cache of known registered and existing channelnames.
+  -- | Cache of known registered and existing names.
   -- Maintained so as to avoid sending unneeded messages
   -- / reject mis-forwarded messages from the server.
   , _cachedNames      :: MVar Cache
@@ -191,13 +191,13 @@ newClient address port cbs = withSocketsDo $ do
          <*> newMVar Map.empty
          <*> pure cbs
 
-expectRegisterResp :: Client -> ChannelName -> MVar Bool -> IO ()
-expectRegisterResp c cName resp =
-  modifyMVar_ (_expectations c) $ return . Map.insertWith (++) (ExpectRegisterResp cName) [resp]
+expectRegisterResp :: Client -> Name -> MVar Bool -> IO ()
+expectRegisterResp c n resp =
+  modifyMVar_ (_expectations c) $ return . Map.insertWith (++) (ExpectRegisterResp n) [resp]
 
-expectQueryResp :: Client -> ChannelName -> MVar Bool -> IO ()
-expectQueryResp c cName resp =
-  modifyMVar_ (_expectations c) $ return . Map.insertWith (++) (ExpectQueryResp cName) [resp]
+expectQueryResp :: Client -> Name -> MVar Bool -> IO ()
+expectQueryResp c n resp =
+  modifyMVar_ (_expectations c) $ return . Map.insertWith (++) (ExpectQueryResp n) [resp]
 
 -- | Notify all parties expecting a type of response message of the result.
 notifyExpecters :: Client -> ExpectMsg -> Bool -> IO ()
@@ -215,22 +215,22 @@ notifyExpecters c expect success =
 --  - We wouldnt have queried if we already knew it existed
 --    => We don't have to remove it
 --  - We only cache proof of existance, not non-existance
-updateCacheQuery :: Client -> ChannelName -> Bool -> IO ()
-updateCacheQuery c cName exists =
-  when exists $ modifyMVar_ (_cachedNames c) $ return . existsName cName
+updateCacheQuery :: Client -> Name -> Bool -> IO ()
+updateCacheQuery c n exists =
+  when exists $ modifyMVar_ (_cachedNames c) $ return . existsName n
 
 
 -- | Update the namecache with the result of a 'Register'
-updateCacheRegister :: Client -> ChannelName -> Bool -> IO ()
-updateCacheRegister c cName registered =
+updateCacheRegister :: Client -> Name -> Bool -> IO ()
+updateCacheRegister c n registered =
   modifyMVar_ (_cachedNames c)
     $ return . if registered
-                 then registerName cName
+                 then registerName n
 
                  -- We failed to register
                  -- => Owned by somebody else
                  -- => Exists
-                 else existsName cName
+                 else existsName n
 
 
 -- | Create and run a new client, connecting to the nameserver at the given
@@ -270,15 +270,15 @@ handleMsgIn :: ServerMsg -> Client -> IO Bool
 handleMsgIn smsg c = case smsg of
 
   -- We have/ havent registered the name
-  RegisterResp cName success
-    -> do updateCacheRegister c cName success
-          notifyExpecters c (ExpectRegisterResp cName) success
+  RegisterResp n success
+    -> do updateCacheRegister c n success
+          notifyExpecters c (ExpectRegisterResp n) success
           return True
 
   -- The name is/ is not registered by somebody
-  QueryResp cName success
-    -> do updateCacheQuery c cName success
-          notifyExpecters c (ExpectQueryResp cName) success
+  QueryResp n success
+    -> do updateCacheQuery c n success
+          notifyExpecters c (ExpectQueryResp n) success
           return True
 
   -- The server is quitting. Also quit outself.
@@ -286,12 +286,12 @@ handleMsgIn smsg c = case smsg of
     -> do forkIO $ (_callbackServerQuit . _callbacks $ c)
           return False
 
-  -- A message has been relayed for the channelname.
-  MsgFor cName msg
-    -> do -- Ensure we only call the handler on channelnames the user has registered
+  -- A message has been relayed for the name.
+  MsgFor n msg
+    -> do -- Ensure we only call the handler on names the user has registered
           Cache registeredNames _ <- readMVar (_cachedNames c)
-          when (Set.member cName registeredNames)
-               (void $ forkIO $ (_callbackMsgFor . _callbacks $ c) cName msg)
+          when (Set.member n registeredNames)
+               (void $ forkIO $ (_callbackMsgFor . _callbacks $ c) n msg)
           return True
 
   -- The (previously registered) names are now unregistered.
@@ -311,58 +311,58 @@ handleMsgOut cmsg c = do
     ClientQuit -> False
     _          -> True
 
--- | Request registration of the given ChannelName.
+-- | Request registration of the given Name.
 --
 -- May block on a response from the nameserver.
 --
 -- - False => Failure => Somebody else owns the name.
 --
--- - True => Success => Future messages sent to the channelname
+-- - True => Success => Future messages sent to the name
 --   will be passed to the clients callback function.
-register :: Client -> ChannelName -> IO Bool
-register c cName = do
+register :: Client -> Name -> IO Bool
+register c n = do
   cache <- readMVar (_cachedNames c)
-  if nameKnown cName cache
+  if nameKnown n cache
     then return False
     else do resp <- newEmptyMVar
-            writeChan (_msgOut c) $ Register cName
-            expectRegisterResp c cName resp
+            writeChan (_msgOut c) $ Register n
+            expectRegisterResp c n resp
             takeMVar resp
 
 
--- | Query whether the given ChannelName is registered.
+-- | Query whether the given Name is registered.
 --
 -- May block on a response from the nameserver.
 --
 -- - False => Is not registered by anybody => May not send messages.
 --
 -- - True  => Is registered by somebody => May continue to send messages.
-query :: Client -> ChannelName -> IO Bool
-query c cName = do
+query :: Client -> Name -> IO Bool
+query c n = do
   cache <- readMVar (_cachedNames c)
-  if nameRegistered cName cache
+  if nameRegistered n cache
       then return True
       else do resp <- newEmptyMVar
-              writeChan (_msgOut c) $ Query cName
-              expectQueryResp c cName resp
+              writeChan (_msgOut c) $ Query n
+              expectQueryResp c n resp
               takeMVar resp
 
--- | Send the message to the given ChannelName.
+-- | Send the message to the given Name.
 --
 -- - False => We don't know of the name => the message wasnt sent.
 --   A successful query (or unsuccesful register) must be made first.
 --
 -- - True  => The message was sent.
-msgTo :: Client -> ChannelName -> Msg -> IO Bool
-msgTo c cName msg = do
+msgTo :: Client -> Name -> Msg -> IO Bool
+msgTo c n msg = do
   cache <- readMVar (_cachedNames c)
-  if nameKnown cName cache
-    then do writeChan (_msgOut c) $ MsgTo cName msg
+  if nameKnown n cache
+    then do writeChan (_msgOut c) $ MsgTo n msg
             return True
     else return False
 
 -- | Signal that the client should/ is quitting,
--- giving up ownership of any previously registered ChannelNames.
+-- giving up ownership of any previously registered Names.
 clientQuit :: Client -> IO ()
 clientQuit c = writeChan (_msgOut c) ClientQuit
 

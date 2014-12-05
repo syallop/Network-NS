@@ -15,8 +15,8 @@ import Data.Serialize
 
 import GHC.Generics
 
--- | Name used to uniquely refer to a channel.
-type ChannelName = String
+-- | Unique name which may be owned.
+type Name = String
 
 -- | Id used to uniquely refer to a client as connected to a server.
 type ClientId = Int
@@ -26,17 +26,17 @@ type Msg = ByteString
 
 -- | Message sent client -> server
 data ClientMsg
-  -- | Request registration of a 'ChannelName'.
+  -- | Request registration of a 'Name'.
   -- Responded to by 'RegisterResp'.
-  = Register   ChannelName
+  = Register   Name
 
-  -- | Query the existance of a 'ChannelName'.
+  -- | Query the existance of a 'Name'.
   -- Responded to by 'QueryResp'.
-  | Query      ChannelName
+  | Query      Name
 
-  -- | Request that the 'Msg' is sent to the owner of the 'ChannelName'.
+  -- | Request that the 'Msg' is sent to the owner of the 'Name'.
   -- No response.
-  | MsgTo      ChannelName Msg
+  | MsgTo      Name Msg
 
   -- | Client is quitting, releasing any registered names.
   -- No response.
@@ -50,22 +50,22 @@ data ServerMsg
   -- | Response to 'Register'. Bool indicates success.
   -- True  => Client will now be relayed messages sent to the name.
   -- False => Name is owned by somebody else.
-  = RegisterResp ChannelName Bool
+  = RegisterResp Name Bool
 
   -- | Response to 'Query'. Bool indicates success.
   -- True  => Name is registered by somebody.
   -- False => Name is currently free.
-  | QueryResp    ChannelName Bool
+  | QueryResp    Name Bool
 
-  -- | Message is relayed for 'ChannelName'.
+  -- | Message is relayed for 'Name'.
   -- Counterpart to a valid 'MsgTo'.
-  | MsgFor       ChannelName Msg
+  | MsgFor       Name Msg
 
   -- | Server is quitting.
   | ServerQuit
 
-  -- | A Non-empty list of 'ChannelName's are no longer registered.
-  | Unregistered ChannelName [ChannelName]
+  -- | A Non-empty list of 'Name's are no longer registered.
+  | Unregistered Name [Name]
   deriving Generic
 instance Serialize ServerMsg
 
