@@ -149,7 +149,7 @@ import           System.IO                              hiding (hPutStr)
 import Prelude hiding (null)
 
 import Join.NS.Types
-
+import Join.NS.Util
 
 -- | Map clientId's to the list of ChannelNames they own
 -- and vice-versa.
@@ -275,52 +275,17 @@ newClient cHandle server = do
 -- - The client handle dies
 -- - A misc exception is thrown
 serveClient :: ClientConn -> Server -> IO ()
-serveClient c s = void $ race (readInput "") $ race handleMsgInQueue handleMsgOutQueue
+serveClient c s = void $ race handleInput $ race handleMsgInQueue handleMsgOutQueue
   where
-    -- Continually read, parse and queue incoming messages.
-    readInput :: ByteString -> IO ()
-    readInput leftover = do
-      msgPart <- hGetSome (_clientHandle c) 1024
-      if null msgPart
-        then return () -- EOF, Client unexpectedly died.
-        else let result = runGetPartial (get :: Get ClientMsg) (leftover `append` msgPart)
-                in caseParseResult result
+    -- Continually read, parse and queue incomming messages
+    handleInput = readInput (_clientHandle c) 1024 (_clientMsgIn c)
 
-    -- Handle the result of an attempt to parse some input
-    caseParseResult :: Result ClientMsg -> IO ()
-    caseParseResult result = case result of
-
-        -- Parser failed. Continue with leftovers.
-        Fail e leftover'
-          -> readInput leftover'
-
-        -- Complete ClientMsg read. Queue and continue with any leftovers.
-        Done msg leftover'
-          -> do receivedFromClient c msg
-                readInput leftover'
-
-        -- More input required. Attempt to read more and try again.
-        Partial f
-          -> do msgPart <- hGetSome (_clientHandle c) 1024
-                if null msgPart
-                  then return ()
-                  else caseParseResult (f msgPart)
-
-      -- Handle the messages in the input queue until continue=False
-    handleMsgInQueue :: IO ()
-    handleMsgInQueue = join $ do
-      inMsg <- readChan (_clientMsgIn c)
-      return $ do
-        continue <- handleMsgIn inMsg c s
-        when continue handleMsgInQueue
+    -- Handle the messages in the input queue until continue=False
+    handleMsgInQueue = handleChan (\msgIn -> handleMsgIn msgIn c s) (_clientMsgIn c)
 
     -- Handle the messages in the output queue until continue=False
-    handleMsgOutQueue :: IO ()
-    handleMsgOutQueue = join $ do
-      outMsg <- readChan (_clientMsgOut c)
-      return $ do
-        continue <- handleMsgOut outMsg c s
-        when continue handleMsgOutQueue
+    handleMsgOutQueue = handleChan (\msgOut -> handleMsgOut msgOut c s) (_clientMsgOut c)
+
 
 -- | Handle a single message from a clients input queue,
 -- returning a bool indicating whether the connection should be closed.

@@ -57,6 +57,8 @@ module Join.NS.Client
    runNewClient
   ,Client()
   ,Callbacks(..)
+  ,ChannelName
+  ,Msg
 
   -- ** Registering ChannelNames
   ,register
@@ -86,6 +88,7 @@ import           System.IO                              hiding (hPutStr)
 import Prelude hiding (null)
 
 import Join.NS.Types
+import Join.NS.Util
 
 -- | Represents an expectation that the client receive a response
 -- of a certain kind.
@@ -204,53 +207,16 @@ runNewClient address port cbs
 -- - The server handle dies
 -- - A misc exception is thrown
 runClient :: Client -> IO ()
-runClient c = void $ race (readInput "") $ race handleMsgInQueue handleMsgOutQueue
+runClient c = void $ race handleInput $ race handleMsgInQueue handleMsgOutQueue
   where
-  -- continually read, parse and queue incoming messages in
-  -- their corresponding queue.
-  readInput :: ByteString -> IO ()
-  readInput leftover = do
-    msgPart <- hGetSome (_serverHandle c) 1024
-    if null msgPart
-      then return ()
-      else let result = runGetPartial (get :: Get ServerMsg) (leftover `append` msgPart)
-              in caseParseResult result
-
-  -- hande the result of an attempt to parse some input
-  caseParseResult :: Result ServerMsg -> IO ()
-  caseParseResult result = case result of
-
-      -- Parser failed. Continue with leftovers.
-      Fail e leftover'
-        -> readInput leftover'
-
-      -- Complete ServerMsg read. Queue and continue with any leftovers.
-      Done smsg leftover'
-        -> do writeChan (_msgIn c) smsg
-              readInput leftover'
-
-      -- More input required. Attempt to read more and try again.
-      Partial f
-        -> do msgPart <- hGetSome (_serverHandle c) 1024
-              if null msgPart
-                then return ()
-                else caseParseResult (f msgPart)
+  -- Continually read, parse and queue incoming messages
+  handleInput = readInput (_serverHandle c) 1024 (_msgIn c)
 
   -- Handle the messages in the input queue until continue=False
-  handleMsgInQueue :: IO ()
-  handleMsgInQueue = join $ do
-    inMsg <- readChan (_msgIn c)
-    return $ do
-      continue <- handleMsgIn inMsg c
-      when continue handleMsgInQueue
+  handleMsgInQueue = handleChan (`handleMsgIn` c) (_msgIn c)
 
   -- Handle the messages in the output queue until continue=False
-  handleMsgOutQueue :: IO ()
-  handleMsgOutQueue = join $ do
-    outMsg <- readChan (_msgOut c)
-    return $ do
-      continue <- handleMsgOut outMsg c
-      when continue handleMsgOutQueue
+  handleMsgOutQueue = handleChan (`handleMsgOut` c) (_msgOut c)
 
 -- | Handle a single message from a clients input queue,
 -- returning a bool indicating whether the connection to the nameserver
@@ -419,7 +385,7 @@ query c cName = do
 --   A successful query (or unsuccesful register) must be made first.
 --
 -- - True  => The message was sent.
-msgTo :: Client -> ChannelName -> ByteString -> IO Bool
+msgTo :: Client -> ChannelName -> Msg -> IO Bool
 msgTo c cName msg = do
   cache <- readMVar (_cachedNames c)
 

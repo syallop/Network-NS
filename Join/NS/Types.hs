@@ -1,4 +1,13 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-|
+Module     : Join.NS.Types
+Copyright  : (c) Samuel A. Yallop, 2014
+Maintainer : syallop@gmail.com
+Stability  : experimental
+
+Define types used by the nameserver server and client.
+
+-}
 module Join.NS.Types where
 
 import Data.ByteString
