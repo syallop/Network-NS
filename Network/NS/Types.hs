@@ -8,7 +8,13 @@ Stability  : experimental
 Define types used by the nameserver server and client.
 
 -}
-module Network.NS.Types where
+module Network.NS.Types
+  (Name
+  ,Msg
+
+  ,ClientMsg(..)
+  ,ServerMsg(..)
+  ) where
 
 import Data.ByteString
 import Data.Serialize
@@ -17,9 +23,6 @@ import GHC.Generics
 
 -- | Unique name which may be owned.
 type Name = String
-
--- | Id used to uniquely refer to a client as connected to a server.
-type ClientId = Int
 
 -- | A raw encoded message
 type Msg = ByteString

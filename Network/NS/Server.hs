@@ -151,6 +151,9 @@ import Prelude hiding (null)
 import Network.NS.Types
 import Network.NS.Util
 
+-- | Id used to uniquely refer to a client as connected to a server.
+type ClientId = Int
+
 -- | Map clientId's to the list of Names they own
 -- and vice-versa.
 newtype NamesMap = NamesMap
