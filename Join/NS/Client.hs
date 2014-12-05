@@ -8,11 +8,52 @@ Stability  : experimental
 Defines a simple client to the nameserver defined at 'Join.NS.Server'.
 
 A Client is responsible for handling interactions with a single nameserver.
+
+
+E.G. given:
+
+@
+callbacks = Callbacks
+  {_callbackMsgFor       = \cname msg -> putStrLn $ show cname ++ " sent: " ++ show msg
+  ,_callbackServerQuit   = putStrLn \"ServerQuit\"
+  ,_callbackUnregistered = \cname cnames -> putStrLn $ "Unregistered: " ++ show (cname:cnames)
+  }
+
+...
+
+-- Client 1
+main = do
+  client1 <- runNewClient "127.0.0.1" 5555 callbacks
+  isRegistered <- register client1 "name1"
+  nameExists   <- query client1 "name2"
+  if isRegistered && nameExists
+    then msgTo client1 "name2" "hello"
+    else return ()
+
+...
+
+-- Client 2
+main = do
+  client2 <- runNewClient "127.0.0.1" 5555 callbacks
+  isRegistered <- register client2 "name2"
+  nameExists   <- query client2 "name1"
+
+  if isRegistered && nameExists
+    then msgTo client2 "name1" "world"
+    else return ()
+@
+
+If Join.NS.Server is ran on 127.0.0.1 with './NS 5555'.
+then if client1 and client2 are compiled and ran, also at 127.0.0.1:
+then the output will be:
+
+@
+ Client1: name1 sent "world"
+ Client2: name2 sent "hello"
+@
 -}
 module Join.NS.Client
   (-- * Running a client
-   -- | A new client may be created and ran by calling 'runNewClient' on the
-   -- address and port of the nameserver.
    runNewClient
   ,Client()
   ,Callbacks(..)
