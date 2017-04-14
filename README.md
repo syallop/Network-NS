@@ -1,14 +1,14 @@
-#A quick and dirty NameServer
+# A quick and dirty NameServer
 This module defines a simple NameServer, a central authority
 allowing clients to register ownership of names which can then
 be queried and passed arbitrary messages.
 
-##Running a Server
+## Running a Server
 A nameserver can either be started as part of a Haskell program
 by calling ‘runNewServer portN’ from ‘Network.NS.Server’
 or by calling ‘NS portN’ at a command line.
 
-##Running a Client
+## Running a Client
 [‘Network.NS.Client’](/Network/NS/Client.hs).
 defines a simple client, providing functions for:
 - Creating clients
@@ -19,7 +19,7 @@ defines a simple client, providing functions for:
 Usage is described more in the
 [‘documentation’](/Network/NS/Client.hs).
 
-###Example
+### Example
 E.G. given:
 
 ```haskell
@@ -83,11 +83,11 @@ Client2:
 name2 sent "hello"
 ```
 
-##Protocol
+## Protocol
 The protocol is described in the documentation for
 [‘Network.NS.Server’](/Network/NS/Server.hs).
 
-##Behaviour
+## Behaviour
 - All messages are routed through the nameserver (clients are invisible to each other)
 - All connections take place over TCP
 - Names can not be unregistered and are owned for the duration of the connection
